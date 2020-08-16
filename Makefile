@@ -1,4 +1,4 @@
-APPNAME = coolapp
+APPNAME = serve
 BLDDIR = build
 BLDFLAGS=
 # extension if windows
