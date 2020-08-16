@@ -39,4 +39,4 @@ After using CertBot to generate the `fullchain.pem` and `privkey.pem` files, spe
 
 ```bash
 sudo ./serve -port 443 -rootdir data_test -ssl -fullchain '/path/to/fullchain.pem' -privkey 'path/to/privkey.pem'
-``
+```
