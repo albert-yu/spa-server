@@ -30,7 +30,7 @@ env GOOS=linux GOARCH=386 make
 ### Copy to target
 
 ```bash
-scp -i path/to/downloaded/ec2/pem path/to/build/serve ec2-user@ec2-54-211-180-247.compute-1.amazonaws.com:/home/ec2-user/targetdirectory
+scp -i path/to/downloaded/ec2/pem path/to/build/serve ec2-user@ec2-ip-addr.compute-1.amazonaws.com:/home/ec2-user/targetdirectory
 ```
 
 ### Point to certificates
