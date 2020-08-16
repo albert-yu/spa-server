@@ -1,6 +1,6 @@
-# go-template
+# Single Page App Server 
 
-Template repository for Go project
+Minimal server for serving a single-page app
 
 ## Build
 
@@ -14,13 +14,29 @@ The compiled executable can be found in the `build/` directory.
 Then, to run it:
 
 ```bash
-./build/coolapp
+./build/serve
 ```
 
-Here, `coolapp` is the value of the `APPNAME` variable in the Makefile.
+## Deployment
 
-## Test
+### Build for target platform
+
+You can pass in environment variables to compile for a different platform. For example, on a Linux x86 (AWS typically) box:
 
 ```bash
-make test
+env GOOS=linux GOARCH=386 make
 ```
+
+### Copy to target
+
+```bash
+scp -i path/to/downloaded/ec2/pem path/to/build/serve ec2-user@ec2-54-211-180-247.compute-1.amazonaws.com:/home/ec2-user/targetdirectory
+```
+
+### Point to certificates
+
+After using CertBot to generate the `fullchain.pem` and `privkey.pem` files, specify these when running it on the live box:
+
+```bash
+sudo ./serve -port 443 -rootdir data_test -ssl -fullchain '/path/to/fullchain.pem' -privkey 'path/to/privkey.pem'
+``
