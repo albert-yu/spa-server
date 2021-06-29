@@ -163,18 +163,18 @@ func main() {
 	log.Println("Press Ctrl+C to quit")
 
 	// run in goroutine to avoid blocking
+	go func() {
+		if err := srv.ListenAndServe(); err != nil {
+			log.Println(err)
+		}
+	}()
+
 	if args.SSL {
 		go func() {
 			if err := srv.ListenAndServeTLS(
 				args.FullChain,
 				args.PrivKey,
 			); err != nil {
-				log.Println(err)
-			}
-		}()
-	} else {
-		go func() {
-			if err := srv.ListenAndServe(); err != nil {
 				log.Println(err)
 			}
 		}()
