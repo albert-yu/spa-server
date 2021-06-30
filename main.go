@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/foomo/simplecert"
@@ -132,31 +133,13 @@ func certAndKey(certCache string) (string, string) {
 	return path.Join(certCache, "cert.pem"), path.Join(certCache, "key.pem")
 }
 
-func serve(ctx context.Context, srv *http.Server, certCache string) {
+func serveTLS(srv *http.Server, certCache string) {
 	cert, key := certAndKey(certCache)
 	go func() {
 		if err := srv.ListenAndServeTLS(cert, key); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("listen: %+s\n", err)
 		}
 	}()
-
-	log.Println("Listening on", srv.Addr)
-	log.Println("Press Ctrl+C to quit")
-	<-ctx.Done()
-	log.Println("Shutting down...")
-
-	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer func() {
-		cancel()
-	}()
-
-	err := srv.Shutdown(shutdown)
-
-	if err == http.ErrServerClosed {
-		log.Println("Server exited properly")
-	} else if err != nil {
-		log.Println("Unexpected error on exit:", err)
-	}
 }
 
 func main() {
@@ -210,12 +193,13 @@ func main() {
 	srv := makeServer(args.RootDir, addr)
 
 	// run in goroutine to avoid blocking
+	ctx, cancel := context.WithTimeout(context.Background(), args.Wait)
+	defer cancel()
 	if args.SSL {
 		var (
 			certReloader *simplecert.CertReloader
 			numRenews    int
 			cfg          = simplecert.Default
-			ctx, cancel  = context.WithCancel(context.Background())
 			tlsConf      = tlsconfig.NewServerTLSConfig(tlsconfig.TLSModeServerStrict)
 		)
 
@@ -235,7 +219,7 @@ func main() {
 
 			certReloader.ReloadNow()
 
-			go serve(ctx, srv, args.CertCache)
+			serveTLS(srv, args.CertCache)
 		}
 
 		certReloader, err := simplecert.Init(cfg, func() {
@@ -251,8 +235,7 @@ func main() {
 		// enable hot reload
 		tlsConf.GetCertificate = certReloader.GetCertificateFunc()
 
-		serve(ctx, srv, args.CertCache)
-
+		serveTLS(srv, args.CertCache)
 	} else {
 		go func() {
 			if err := srv.ListenAndServe(); err != nil {
@@ -262,13 +245,18 @@ func main() {
 	}
 
 	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt)
+	signal.Notify(c, syscall.SIGHUP, syscall.SIGINT, syscall.SIGQUIT)
 
 	// block until we receive our signal
 	<-c
-	ctx, cancel := context.WithTimeout(context.Background(), args.Wait)
-	defer cancel()
-	srv.Shutdown(ctx)
+	err := srv.Shutdown(ctx)
+
 	log.Println("Shutting down...")
+	if err == http.ErrServerClosed {
+		log.Println("Server exited properly")
+	} else if err != nil {
+		log.Println("Unexpected error on exit:", err)
+		os.Exit(1)
+	}
 	os.Exit(0)
 }
