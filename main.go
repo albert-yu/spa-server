@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/foomo/simplecert"
+	"github.com/foomo/tlsconfig"
 	"github.com/gorilla/mux"
 	"github.com/rs/cors"
 )
@@ -65,9 +67,10 @@ type CmdLineArgs struct {
 	Port      int
 	RootDir   string
 	Wait      time.Duration
+	Domain    string
 	SSL       bool
-	FullChain string
-	PrivKey   string
+	CertCache string
+	SSLEmail  string
 }
 
 func parseArgs() CmdLineArgs {
@@ -96,6 +99,12 @@ func parseArgs() CmdLineArgs {
 		time.Second*15,
 		"The duration for which the server should gracefully wait for existing connections to finish",
 	)
+	flag.StringVar(
+		&args.Domain,
+		"domain",
+		"",
+		"The public domain name of the site",
+	)
 	flag.BoolVar(
 		&args.SSL,
 		"ssl",
@@ -103,75 +112,140 @@ func parseArgs() CmdLineArgs {
 		"Run in SSL mode?",
 	)
 	flag.StringVar(
-		&args.FullChain,
-		"fullchain",
+		&args.CertCache,
+		"certcache",
 		"",
-		"Path to fullchain.pem",
+		"Path to the certificate cache (e.g. letsencrypt/live/mysite.com/)",
 	)
 	flag.StringVar(
-		&args.PrivKey,
-		"privkey",
+		&args.SSLEmail,
+		"sslemail",
 		"",
-		"Path to privkey.pem",
+		"SSL email address",
 	)
 	flag.Parse()
 	return args
+}
+
+func serve(ctx context.Context, srv *http.Server) {
+	go func() {
+		if err := srv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("listen: %+s\n", err)
+		}
+	}()
+
+	log.Println("Listening on", srv.Addr)
+	log.Println("Press Ctrl+C to quit")
+	<-ctx.Done()
+	log.Println("Shutting down...")
+
+	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer func() {
+		cancel()
+	}()
+
+	err := srv.Shutdown(shutdown)
+
+	if err == http.ErrServerClosed {
+		log.Println("Server exited properly")
+	} else if err != nil {
+		log.Println("Unexpected error on exit:", err)
+	}
 }
 
 func main() {
 	args := parseArgs()
 
 	// web server
-	const writeTimeout = 1 * 60
-	const readTimeout = 1 * 60
-	const idleTimeout = 2 * 60
+	const (
+		writeTimeout = 1 * 60
+		readTimeout  = 1 * 60
+		idleTimeout  = 2 * 60
+	)
+
 	addr := fmt.Sprintf("%s:%d", args.Host, args.Port)
 	if args.SSL {
 		if args.Port != 443 {
 			log.Fatal("Port needs to be 443 if SSL enabled")
 		}
-		if args.FullChain == "" {
-			log.Fatal("Path to fullchain.pem required if SSL enabled")
+		if args.CertCache == "" {
+			log.Fatal("Path certificate cache required if SSL enabled")
 		}
-		if args.PrivKey == "" {
-			log.Fatal("Path to privkey.pem required if SSL enabled")
+		if args.SSLEmail == "" {
+			log.Fatal("SSL Email if SSL enabled")
 		}
 	}
 
-	r := mux.NewRouter()
+	makeServer := func(rootDir, addr string) *http.Server {
+		r := mux.NewRouter()
 
-	// ping for convenience
-	r.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("{\"response\": \"pong\"}"))
-	}).Methods("GET")
+		// ping for convenience
+		r.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte("{\"response\": \"pong\"}"))
+		}).Methods("GET")
 
-	spa := spaHandler{
-		staticPath: args.RootDir,
-		indexPath:  "index.html",
+		spa := spaHandler{
+			staticPath: rootDir,
+			indexPath:  "index.html",
+		}
+		r.PathPrefix("/").Handler(spa)
+
+		handler := cors.Default().Handler(r)
+		return &http.Server{
+			Handler:      handler,
+			Addr:         addr,
+			WriteTimeout: writeTimeout * time.Second,
+			ReadTimeout:  readTimeout * time.Second,
+			IdleTimeout:  idleTimeout * time.Second,
+		}
 	}
-	r.PathPrefix("/").Handler(spa)
 
-	handler := cors.Default().Handler(r)
-	srv := &http.Server{
-		Handler:      handler,
-		Addr:         addr,
-		WriteTimeout: writeTimeout * time.Second,
-		ReadTimeout:  readTimeout * time.Second,
-		IdleTimeout:  idleTimeout * time.Second,
-	}
-	log.Println("Listening on", addr)
-	log.Println("Press Ctrl+C to quit")
+	srv := makeServer(args.RootDir, addr)
 
 	// run in goroutine to avoid blocking
 	if args.SSL {
-		go func() {
-			if err := srv.ListenAndServeTLS(
-				args.FullChain,
-				args.PrivKey,
-			); err != nil {
-				log.Println(err)
-			}
-		}()
+		var (
+			certReloader *simplecert.CertReloader
+			numRenews    int
+			cfg          = simplecert.Default
+			ctx, cancel  = context.WithCancel(context.Background())
+			tlsConf      = tlsconfig.NewServerTLSConfig(tlsconfig.TLSModeServerStrict)
+		)
+
+		cfg.Domains = []string{args.Domain}
+		cfg.CacheDir = args.CertCache
+		cfg.SSLEmail = args.SSLEmail
+		cfg.HTTPAddress = ""
+
+		cfg.WillRenewCertificate = func() {
+			cancel()
+		}
+
+		cfg.DidRenewCertificate = func() {
+			numRenews++
+			srv = makeServer(args.RootDir, addr)
+			srv.TLSConfig = tlsConf
+
+			certReloader.ReloadNow()
+
+			go serve(ctx, srv)
+		}
+
+		certReloader, err := simplecert.Init(cfg, func() {
+			os.Exit(0)
+		})
+		if err != nil {
+			log.Fatal("simplecert init failed: ", err)
+		}
+
+		// redirect to HTTPS
+		go http.ListenAndServe(":80", http.HandlerFunc(simplecert.Redirect))
+
+		// enable hot reload
+		tlsConf.GetCertificate = certReloader.GetCertificateFunc()
+
+		serve(ctx, srv)
+
 	} else {
 		go func() {
 			if err := srv.ListenAndServe(); err != nil {
