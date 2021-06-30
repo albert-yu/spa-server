@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"time"
 
@@ -127,9 +128,14 @@ func parseArgs() CmdLineArgs {
 	return args
 }
 
-func serve(ctx context.Context, srv *http.Server) {
+func certAndKey(certCache string) (string, string) {
+	return path.Join(certCache, "cert.pem"), path.Join(certCache, "key.pem")
+}
+
+func serve(ctx context.Context, srv *http.Server, certCache string) {
+	cert, key := certAndKey(certCache)
 	go func() {
-		if err := srv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+		if err := srv.ListenAndServeTLS(cert, key); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("listen: %+s\n", err)
 		}
 	}()
@@ -228,7 +234,7 @@ func main() {
 
 			certReloader.ReloadNow()
 
-			go serve(ctx, srv)
+			go serve(ctx, srv, args.CertCache)
 		}
 
 		certReloader, err := simplecert.Init(cfg, func() {
@@ -244,7 +250,7 @@ func main() {
 		// enable hot reload
 		tlsConf.GetCertificate = certReloader.GetCertificateFunc()
 
-		serve(ctx, srv)
+		serve(ctx, srv, args.CertCache)
 
 	} else {
 		go func() {
