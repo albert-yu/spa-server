@@ -33,10 +33,10 @@ env GOOS=linux GOARCH=386 make
 scp -i path/to/downloaded/ec2/pem path/to/build/serve ec2-user@ec2-ip-addr.compute-1.amazonaws.com:/home/ec2-user/targetdirectory
 ```
 
-### Point to certificates
+### SSL
 
-After using CertBot to generate the `fullchain.pem` and `privkey.pem` files, specify these when running it on the live box:
+This executable integrates [simplecert](https://github.com/foomo/simplecert), so certificate generation is automatic. If the `-ssl` option is enabled, then run:
 
 ```bash
-sudo ./serve -port 443 -rootdir data_test -ssl -fullchain '/path/to/fullchain.pem' -privkey 'path/to/privkey.pem'
+sudo ./serve -port 443 -rootdir my_app -ssl -domain mysite.com -sslemail email@domain.com -certcache /etc/letsencrypt/live/mysite.com
 ```
