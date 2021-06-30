@@ -169,7 +169,6 @@ func main() {
 		idleTimeout  = 2 * 60
 	)
 
-	addr := fmt.Sprintf("%s:%d", args.Host, args.Port)
 	if args.SSL {
 		if args.Port != 443 {
 			args.Port = 443
@@ -182,6 +181,7 @@ func main() {
 			log.Fatal("SSL Email if SSL enabled")
 		}
 	}
+	addr := fmt.Sprintf("%s:%d", args.Host, args.Port)
 
 	makeServer := func(rootDir, addr string) *http.Server {
 		r := mux.NewRouter()
