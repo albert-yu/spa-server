@@ -172,7 +172,8 @@ func main() {
 	addr := fmt.Sprintf("%s:%d", args.Host, args.Port)
 	if args.SSL {
 		if args.Port != 443 {
-			log.Fatal("Port needs to be 443 if SSL enabled")
+			args.Port = 443
+			log.Println("Port set to 443 since SSL enabled")
 		}
 		if args.CertCache == "" {
 			log.Fatal("Path certificate cache required if SSL enabled")
